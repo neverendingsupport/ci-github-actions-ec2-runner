@@ -1,6 +1,11 @@
 const core = require('@actions/core');
 const github = require('@actions/github');
 
+const defaultTagLabels = [
+  { key: 'gh-runner-label', value: (c) => c.input.label },
+  { key: 'gh-spot-strategy', value: (c) => c.input.strategy },
+];
+
 class Config {
   constructor() {
     this.input = {
@@ -15,13 +20,20 @@ class Config {
       iamRoleName: core.getInput('iam-role-name'),
       runnerHomeDir: core.getInput('runner-home-dir'),
       preRunnerScript: core.getInput('pre-runner-script'),
+      strategy: core.getInput('spot-instance-strategy'),
+      count: +core.getInput('count'),
     };
 
-    const tags = JSON.parse(core.getInput('aws-resource-tags'));
+    this.awsTags = JSON.parse(core.getInput('aws-resource-tags') || '[]');
     this.tagSpecifications = null;
-    if (tags.length > 0) {
-      this.tagSpecifications = [{ResourceType: 'instance', Tags: tags}, {ResourceType: 'volume', Tags: tags}];
+    if (this.awsTags.length > 0) {
+      this.tagSpecifications = [
+        { ResourceType: 'instance', Tags: this.awsTags },
+        { ResourceType: 'volume', Tags: this.awsTags },
+      ];
     }
+
+    this.addTags(defaultTagLabels.map((t) => ({ Key: t.key, Value: t.value(this) })));
 
     // the values of github.context.repo.owner and github.context.repo.repo are taken from
     // the environment variable GITHUB_REPOSITORY specified in "owner/repo" format and
@@ -44,11 +56,16 @@ class Config {
     }
 
     if (this.input.mode === 'start') {
-      if (!this.input.ec2ImageId || !this.input.ec2InstanceType || !this.input.subnetId || !this.input.securityGroupId) {
+      if (
+        !this.input.ec2ImageId ||
+        !this.input.ec2InstanceType ||
+        !this.input.subnetId ||
+        !this.input.securityGroupId
+      ) {
         throw new Error(`Not all the required inputs are provided for the 'start' mode`);
       }
     } else if (this.input.mode === 'stop') {
-      if (!this.input.label || !this.input.ec2InstanceId) {
+      if (!this.input.label) {
         throw new Error(`Not all the required inputs are provided for the 'stop' mode`);
       }
     } else {
@@ -56,8 +73,42 @@ class Config {
     }
   }
 
-  generateUniqueLabel() {
-    return Math.random().toString(36).substr(2, 5);
+  addTags(tags) {
+    this.tagSpecifications = this.tagSpecifications.map((spec) => {
+      spec.Tags = spec.Tags.concat(tags);
+      return spec;
+    });
+  }
+
+  getIndentifyingTags() {
+    return [
+      ...defaultTagLabels
+        // exclude spot strategy in case any instances are created without spot-strategy
+        .filter((t) => t.key !== 'gh-spot-strategy')
+        .map((t) => {
+          return {
+            Name: `tag:${t.key}`,
+            Values: [t.value(this)],
+          };
+        }),
+      ...this.awsTags.map((t) => {
+        return {
+          Name: `tag:${t.Key}`,
+          Values: [t.Value],
+        };
+      }),
+    ];
+  }
+
+  generateUniqueLabels(noOfLabels) {
+    const count = noOfLabels || this.input.count;
+    // return Math.random().toString(36).slice(2, 7);
+    const labels = [];
+    core.info(`Generating ${count} runner labels`);
+    for (let i = 0; i < (count || 0); i++) {
+      labels.push(Math.random().toString(36).slice(2, 7));
+    }
+    return labels;
   }
 }
 
