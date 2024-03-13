@@ -35,15 +35,15 @@ async function getRunners(labels) {
       }
     }
 
-    if (foundLabels.length !== labels.length) {
-      const remainingLabels = [];
-      for (let i = 0; i < labels.length; i++) {
-        if (foundLabels.indexOf(labels[i]) === -1) {
-          remainingLabels.push(labels);
-        }
-      }
-      core.info(`Labels ${JSON.stringify(remainingLabels)} not found in github runners`);
-    }
+    // if (foundLabels.length !== labels.length) {
+    //   const remainingLabels = [];
+    //   for (let i = 0; i < labels.length; i++) {
+    //     if (foundLabels.indexOf(labels[i]) === -1) {
+    //       remainingLabels.push(labels[i]);
+    //     }
+    //   }
+    //   // core.info(`Labels ${JSON.stringify(remainingLabels)} not found in github runners`);
+    // }
 
     if (Object.keys(foundRunners).length) {
       core.info(`FOUND RUNNERS WITH LABELS: ${JSON.stringify(foundRunners)}`);
@@ -100,7 +100,6 @@ async function removeRunners(labels) {
         _.merge(config.githubContext, { runner_id: runner.id })
       );
       core.info(`GitHub self-hosted runner ${runner.name} is removed`);
-      return;
     } catch (error) {
       core.error(`GitHub self-hosted runner removal error: ${error}`);
       if (!firstError) {
@@ -113,48 +112,10 @@ async function removeRunners(labels) {
   }
 }
 
-async function getRegisteredAndUnregisteredGHRunners(labelInstanceIdPairs) {
-  const registeredHash = {};
-  const unregisteredHash = {};
-  const runnersHash = (await getRunners(labelInstanceIdPairs.map((lidp) => lidp.label))) || [
-    { labels: [] },
-  ];
-
-  core.info(`Runners registered: ${JSON.stringify(runnersHash)}`);
-
-  // add registered runners to registeredHash, keyed by label
-  for (let i = 0; i < labelInstanceIdPairs.length; i++) {
-    const runners = Object.values(runnersHash);
-    for (let j = 0; j < runners.length; j++) {
-      const runner = runners[j];
-      for (let k = 0; k < runner.labels.length; k++) {
-        const label = runner.labels[k];
-        if (label.name === labelInstanceIdPairs[i].label) {
-          const index = labelInstanceIdPairs.map((lidp) => lidp.label).indexOf(label.name);
-          if (index > -1) {
-            registeredHash[labelInstanceIdPairs[i].label] = labelInstanceIdPairs[i];
-          }
-        }
-      }
-    }
-  }
-
-  for (let i = 0; i < labelInstanceIdPairs.length; i++) {
-    if (!registeredHash[labelInstanceIdPairs[i].label]) {
-      unregisteredHash[labelInstanceIdPairs[i].label] = labelInstanceIdPairs[i];
-    }
-  }
-
-  return {
-    registered: Object.values(registeredHash),
-    unregistered: Object.values(unregisteredHash),
-  };
-}
-
-async function waitForAllRunnersToBeRegistered(labelInstanceIdPairs) {
-  const timeoutMinutes = 1;
+async function runnersRegisteredSuccessfully(labelInstanceIdPairs) {
   const retryIntervalSeconds = 15;
-  let waitSeconds = 0;
+  let retries = 0;
+  const maxRetries = 10;
 
   core.info(
     `Checking Github every ${retryIntervalSeconds}s to see if the self-hosted runners are registered ${JSON.stringify(
@@ -162,45 +123,33 @@ async function waitForAllRunnersToBeRegistered(labelInstanceIdPairs) {
     )}`
   );
 
-  let runnersToRegister = labelInstanceIdPairs; // try to register ALL
-  let registeredRunners = []; // bucket for successful runners
-  let unregisteredRunners = []; // bucket for runners that failed to register
-
   return new Promise((resolve) => {
     const interval = setInterval(async () => {
-      const { registered, unregistered } = await getRegisteredAndUnregisteredGHRunners(
-        runnersToRegister
-      );
+      const runnersHash = await getRunners([config.input.label]);
+      const uniqueRunners = Object.values(runnersHash || {});
+      const onlineRunners = uniqueRunners.filter((runner) => runner.status === 'online');
+      const labelMatchedRunnersCount = onlineRunners.length;
 
-      registeredRunners = [...registeredRunners, ...(registered || [])];
-
-      unregisteredRunners = unregistered;
-
-      // if we have any runners not yet registered
-      if (unregisteredRunners.length) {
-        runnersToRegister = unregisteredRunners;
-        waitSeconds += retryIntervalSeconds;
-
-        // all runners registered
-      } else if (registeredRunners.length === labelInstanceIdPairs.length) {
+      if (labelMatchedRunnersCount >= labelInstanceIdPairs.length) {
+        if (labelInstanceIdPairs.length === 0) {
+          // they match, but there are no runners
+          clearInterval(interval);
+          return resolve(false);
+        }
+        core.info(`The runners... We got em! Let's GTFOH, babay!!!`);
         clearInterval(interval);
-        return resolve({
-          registered: registeredRunners || [],
-          unregistered: unregisteredRunners || [],
-        });
+        return resolve(true);
+      }
+      retries += 1;
+
+      if (retries >= maxRetries) {
+        clearInterval(interval);
+        return resolve(false);
       }
 
-      if (waitSeconds > timeoutMinutes * 60) {
-        clearInterval(interval);
-        return resolve({
-          registered: registeredRunners || [],
-          unregistered: unregisteredRunners || [],
-        });
-      }
+      const remainingRunnersCount = labelInstanceIdPairs.length - labelMatchedRunnersCount;
 
-      core.info(
-        `Checking... Still need the following runners: ${JSON.stringify(runnersToRegister)}`
-      );
+      core.info(`Checking Again... Still need ${remainingRunnersCount} more runners.`);
     }, retryIntervalSeconds * 1000);
   });
 }
@@ -208,5 +157,5 @@ async function waitForAllRunnersToBeRegistered(labelInstanceIdPairs) {
 module.exports = {
   getRegistrationToken,
   removeRunners,
-  waitForAllRunnersToBeRegistered,
+  runnersRegisteredSuccessfully,
 };

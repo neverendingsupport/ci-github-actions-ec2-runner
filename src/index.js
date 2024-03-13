@@ -3,66 +3,52 @@ const gh = require('./gh');
 const config = require('./config');
 const core = require('@actions/core');
 
-const startRetryLimit = 5;
-let startRetries = 0;
-
 function setOutput(labelInstanceIdPairs) {
   core.setOutput('labelInstanceIdPairs', JSON.stringify(labelInstanceIdPairs));
 }
 
-async function startAndRegisterRunners(labels, allRegisteredRunners) {
-  allRegisteredRunners = allRegisteredRunners || [];
-
+async function startAndRegisterRunners() {
   const githubRegistrationToken = await gh.getRegistrationToken();
-  core.info(`Generating ${labels.length} EC2 instances: ${JSON.stringify(labels)}`);
+  core.info(`Generating ${config.input.count} EC2 instances for label: ${config.input.label}`);
 
-  const labelInstanceIdPairs = await aws.startEc2Instances(labels, githubRegistrationToken);
+  const labelInstanceIdPairs = await aws.startEc2Instances(githubRegistrationToken);
 
   await aws.waitForAllInstances(labelInstanceIdPairs);
 
-  const { registered, unregistered } = await gh.waitForAllRunnersToBeRegistered(
+  const runnersRegisteredSuccessfully = await gh.runnersRegisteredSuccessfully(
     labelInstanceIdPairs
   );
 
-  allRegisteredRunners = [...allRegisteredRunners, ...(registered || [])];
-
-  try {
-    if (unregistered.length) {
-      if (startRetries < startRetryLimit) {
-        // we tried a few times and these runners didn't start
-        core.info(`${unregistered.length} failed runners`);
-        await aws.stopEc2Instances(unregistered.map((lidp) => lidp.ec2InstanceId));
-        await gh.removeRunners(unregistered.map((lidp) => lidp.label));
-        startRetries++;
-        labels = config.generateUniqueLabels(unregistered.labelInstanceIdPairs.length);
-        return await startAndRegisterRunners(labels, allRegisteredRunners);
-      }
-
-      // kill all instances and runners
-      await aws.stopEc2Instances(allRegisteredRunners.map((lidp) => lidp.ec2InstanceId));
-      await gh.removeRunners(allRegisteredRunners.map((lidp) => lidp.label));
-
-      // die
-      core.error(
-        `Retried to start a batch of runners ${startRetries} times. Failed over the ${startRetryLimit} threshold`
+  // runners did not register in gh in time
+  if (!runnersRegisteredSuccessfully) {
+    if (labelInstanceIdPairs.length && labelInstanceIdPairs.length > 50) {
+      core.info(
+        [
+          `ALRIGHT - we came, we saw, we did not conquer,`,
+          `but we have ${labelInstanceIdPairs.length} instances we can use,`,
+          `\n-\nzo lezz go...\n-\n`,
+        ].join(' ')
       );
+    } else {
+      core.error('NO INSTANCES RUNNING. EPIC FAIL');
     }
-  } catch (error) {
-    core.error(JSON.stringify(error));
+    // // cost ineffective to pay for all the instances we spun up for nothing
+    // await aws.stopEc2Instances(labelInstanceIdPairs.map((lidp) => lidp.ec2InstanceId));
+    // await gh.removeRunners([config.input.label]);
+    // return await startAndRegisterRunners();
   }
 
-  return allRegisteredRunners;
+  return labelInstanceIdPairs;
 }
 
 async function start() {
   core.info('starting runners with the following parameters: ', JSON.stringify(config.input));
-  const labels = config.generateUniqueLabels();
-  const labelAndRunnerIds = await startAndRegisterRunners(labels);
+  const labelAndRunnerIds = await startAndRegisterRunners();
   setOutput(labelAndRunnerIds);
 }
 
 async function stop() {
-  await aws.terminateEc2Instance();
+  await aws.terminateEc2InstancesByTags();
   await gh.removeRunners();
 }
 
