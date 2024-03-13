@@ -25,7 +25,7 @@ class SpotParams {
 
   async getSpotInstancePrice(instanceType) {
     const params = {
-      AvailabilityZone: await this.getSubnetAz(),
+      // AvailabilityZone: await this.getSubnetAz(),
       //EndTime: new Date || 'Wed Dec 31 1969 16:00:00 GMT-0800 (PST)' || 123456789,
       InstanceTypes: [instanceType ? instanceType : config.input.ec2InstanceType],
       ProductDescriptions: [
@@ -49,20 +49,23 @@ class SpotParams {
   }
 
   async getInstanceSizesForType(instanceClass, includeBareMetal) {
-    includeBareMetal === undefined ? false : includeBareMetal;
     var params = {
       Filters: [
         {
           Name: 'instance-type',
           Values: [`${instanceClass}.*`],
         },
-        {
-          Name: 'bare-metal',
-          Values: [`${includeBareMetal}`],
-        },
       ],
       MaxResults: 99,
     };
+
+    includeBareMetal === undefined ? false : includeBareMetal;
+    if (includeBareMetal) {
+      params.Filters.push({
+        Name: 'bare-metal',
+        Values: [`${includeBareMetal}`],
+      });
+    }
 
     const instanceTypesList = [];
     let nextToken = '';
@@ -99,7 +102,9 @@ class SpotParams {
       currentInstanceTypeIndex + 1 < instanceTypeList.length
         ? currentInstanceTypeIndex + 1
         : currentInstanceTypeIndex;
-    return instanceTypeList[nextInstanceTypeIndex].name;
+    if (instanceTypeList[nextInstanceTypeIndex] && instanceTypeList[nextInstanceTypeIndex].name) {
+      return instanceTypeList[nextInstanceTypeIndex].name;
+    }
   }
 
   async bestSpotSizeForOnDemandPrice() {
@@ -118,18 +123,25 @@ class SpotParams {
       if (spotPriceForLargerInstance > 0 && currentOnDemandPrice > spotPriceForLargerInstance) {
         bestInstanceType = nextLargerInstance;
       }
+      if (!nextLargerInstance) {
+        throw 'Unable to get next larger instance for MaxPerformance Spot Strategy!';
+      }
     } while (bestInstanceType != previousInstanceType);
 
     return bestInstanceType;
   }
 
   async modifyInstanceConfiguration(params, ec2SpotInstanceStrategy) {
-    function addTags(tagSpecifications, tags) {
-      return tagSpecifications.map((spec) => {
-        spec.Tags = spec.Tags.concat(tags);
-        return spec;
-      });
+    function updateTag(tagSpecifications, tagName, tagValue) {
+      for (let i = 0; i < tagSpecifications.length; i++) {
+        for (let j = 0; j < tagSpecifications[i].Tags.length; j++) {
+          if (tagSpecifications[i].Tags[j].Key === tagName) {
+            tagSpecifications[i].Tags[j].Value = tagValue;
+          }
+        }
+      }
     }
+
     const ec2Pricing = new Ec2Pricing();
     const currentInstanceTypePrice = await ec2Pricing.getPriceForInstanceTypeUSD(
       config.input.ec2InstanceType
@@ -140,6 +152,19 @@ class SpotParams {
       InstanceMarketOptions: {},
     });
 
+    // const d1 = new Date();
+    // const date = new Date(d1);
+    // date.setMinutes(d1.getMinutes() + 25);
+    // const nowUtc = Date.UTC(
+    //   date.getUTCFullYear(),
+    //   date.getUTCMonth(),
+    //   date.getUTCDate(),
+    //   date.getUTCHours(),
+    //   date.getUTCMinutes(),
+    //   date.getUTCSeconds()
+    // );
+    // const ValidUntil = new Date(nowUtc).toISOString();
+
     switch (ec2SpotInstanceStrategy.toLowerCase()) {
       case 'spotonly': {
         params.InstanceMarketOptions = {
@@ -148,33 +173,32 @@ class SpotParams {
             InstanceInterruptionBehavior: 'terminate',
             MaxPrice: `${await this.getSpotInstancePrice(config.input.ec2InstanceType)}`,
             SpotInstanceType: 'one-time',
+            // ValidUntil,
           },
         };
-        addTags(params.TagSpecifications, [
-          {
-            Key: 'spot-strategy',
-            Value: 'spotonly',
-          },
-        ]);
+        updateTag(params.TagSpecifications, 'actual-spot-strategy', 'spotonly');
         break;
       }
       case 'besteffort': {
         const spotInstanceTypePrice = await this.getSpotInstancePrice(config.input.ec2InstanceType);
-        if (currentInstanceTypePrice && spotInstanceTypePrice < currentInstanceTypePrice)
+        if (currentInstanceTypePrice && spotInstanceTypePrice < currentInstanceTypePrice) {
+          core.info(`Spot Instance Price: ${spotInstanceTypePrice}`);
+          core.info(`Current Reserved Instance Price: ${currentInstanceTypePrice}`);
           params.InstanceMarketOptions = {
             MarketType: 'spot',
             SpotOptions: {
               InstanceInterruptionBehavior: 'terminate',
-              MaxPrice: `${currentInstanceTypePrice}`,
+              MaxPrice: currentInstanceTypePrice.toString(),
               SpotInstanceType: 'one-time',
+              // ValidUntil,
             },
           };
-        addTags(params.TagSpecifications, [
-          {
-            Key: 'spot-strategy',
-            Value: 'besteffort',
-          },
-        ]);
+          updateTag(
+            params.TagSpecifications,
+            'actual-spot-strategy',
+            `besteffort: $${spotInstanceTypePrice}`
+          );
+        }
         break;
       }
       case 'maxperformance': {
@@ -185,24 +209,15 @@ class SpotParams {
             InstanceInterruptionBehavior: 'terminate',
             MaxPrice: currentInstanceTypePrice.toString(),
             SpotInstanceType: 'one-time',
+            // ValidUntil,
           },
         };
-        addTags(params.TagSpecifications, [
-          {
-            Key: 'spot-strategy',
-            Value: 'maxperformance',
-          },
-        ]);
+        updateTag(params.TagSpecifications, 'actual-spot-strategy', 'max-performance');
         break;
       }
       case 'none': {
         params.InstanceMarketOptions = {};
-        addTags(params.TagSpecifications, [
-          {
-            Key: 'spot-strategy',
-            Value: 'none',
-          },
-        ]);
+        updateTag(params.TagSpecifications, 'actual-spot-strategy', 'none');
         break;
       }
       default: {

@@ -17,7 +17,9 @@
     "package": "ncc build ./src/index.js",
     "build": "echo \"!!!!!!!!!!!!!!!!!!!!!!!!\n Be sure to use node v16\n!!!!!!!!!!!!!!!!!!!!!!!!\" && ncc build src/index.js -o dist",
     "remove-runners": "node -r dotenv/config remove-runners.js",
-    "start-runners": "node -r dotenv/config src/index.js dotenv_config_path=.env.start"
+    "stop-runners-ci": "node src/index.js",
+    "start-runners": "node -r dotenv/config src/index.js dotenv_config_path=.env.start",
+    "stop-runners": "node -r dotenv/config src/index.js dotenv_config_path=.env.stop"
   },
   "dependencies": {
     "@actions/core": "^1.10.0",

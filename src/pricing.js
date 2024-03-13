@@ -10,7 +10,7 @@ class Ec2Pricing {
 
   async getSpotInstancePrice(instanceType) {
     const params = {
-      AvailabilityZone: await this.getSubnetAz(),
+      // AvailabilityZone: await this.getSubnetAz(),
       //EndTime: new Date || 'Wed Dec 31 1969 16:00:00 GMT-0800 (PST)' || 123456789,
       InstanceTypes: [instanceType ? instanceType : config.input.ec2InstanceType],
       ProductDescriptions: [

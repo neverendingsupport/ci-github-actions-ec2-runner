@@ -43,6 +43,7 @@ inputs:
       The label is used to remove the runner from GitHub when the runner is not needed anymore.
       This input is required if you use the 'stop' mode.
     required: false
+    default: 'nes-self-hosted-runners'
   ec2-instance-id:
     description: >-
       EC2 Instance Id of the created runner.
