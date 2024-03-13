@@ -69,18 +69,25 @@ inputs:
     description: >-
       Specifies bash commands to run before the runner starts. It's useful for installing dependencies with apt-get, yum, dnf, etc.
     required: false
+  count:
+    type: number
+    description: >-
+      Specifies the number of runners and ec2 instances to create
+    default: 1
+  spot-instance-strategy:
+    description: >-
+      aws ec2 instance strategy (options; None, SpotOnly, BestEffort, MaxPerformance)
+    default: None
 
 outputs:
-  label:
+  labelInstanceIdPairs:
     description: >-
-      Name of the unique label assigned to the runner.
-      The label is used in two cases:
-      - to use as the input of 'runs-on' property for the following jobs;
-      - to remove the runner from GitHub when it is not needed anymore.
-  ec2-instance-id:
-    description: >-
-      EC2 Instance Id of the created runner.
-      The id is used to terminate the EC2 instance when the runner is not needed anymore.
+      JSON `{ label: string, ec2InstanceId: string }[]`:
+      `label`:
+        - is used as the 'runs-on' property for any job you wish to send to a runner
+        - is used to remove each runner from GitHub when a job is complete
+      `ec2InstanceId`:
+        - is used to terminate the EC2 instance when the runner is not needed anymore.
 runs:
   using: node20
   main: ./dist/index.js

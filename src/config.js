@@ -15,13 +15,25 @@ class Config {
       iamRoleName: core.getInput('iam-role-name'),
       runnerHomeDir: core.getInput('runner-home-dir'),
       preRunnerScript: core.getInput('pre-runner-script'),
+      strategy: core.getInput('spot-instance-strategy'),
+      count: +core.getInput('count'),
     };
 
-    const tags = JSON.parse(core.getInput('aws-resource-tags'));
+    const tags = JSON.parse(core.getInput('aws-resource-tags') || '[]');
     this.tagSpecifications = null;
     if (tags.length > 0) {
-      this.tagSpecifications = [{ResourceType: 'instance', Tags: tags}, {ResourceType: 'volume', Tags: tags}];
+      this.tagSpecifications = [
+        { ResourceType: 'instance', Tags: tags },
+        { ResourceType: 'volume', Tags: tags },
+      ];
     }
+
+    // if (this.input.strategy) {
+    //   const parts = this.input.ec2InstanceType.split('::');
+    //   this.input.ec2InstanceType = {
+    //     strategies: parts,
+    //   };
+    // }
 
     // the values of github.context.repo.owner and github.context.repo.repo are taken from
     // the environment variable GITHUB_REPOSITORY specified in "owner/repo" format and
@@ -44,7 +56,12 @@ class Config {
     }
 
     if (this.input.mode === 'start') {
-      if (!this.input.ec2ImageId || !this.input.ec2InstanceType || !this.input.subnetId || !this.input.securityGroupId) {
+      if (
+        !this.input.ec2ImageId ||
+        !this.input.ec2InstanceType ||
+        !this.input.subnetId ||
+        !this.input.securityGroupId
+      ) {
         throw new Error(`Not all the required inputs are provided for the 'start' mode`);
       }
     } else if (this.input.mode === 'stop') {
@@ -56,8 +73,15 @@ class Config {
     }
   }
 
-  generateUniqueLabel() {
-    return Math.random().toString(36).substr(2, 5);
+  generateUniqueLabels(noOfLabels) {
+    const count = noOfLabels || this.input.count;
+    // return Math.random().toString(36).slice(2, 7);
+    const labels = [];
+    core.info(`Generating ${count} runner labels`);
+    for (let i = 0; i < (count || 0); i++) {
+      labels.push(Math.random().toString(36).slice(2, 7));
+    }
+    return labels;
   }
 }
 
