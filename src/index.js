@@ -3,23 +3,53 @@ const gh = require('./gh');
 const config = require('./config');
 const core = require('@actions/core');
 
-function setOutput(label, ec2InstanceId) {
-  core.setOutput('label', label);
-  core.setOutput('ec2-instance-id', ec2InstanceId);
+function setOutput(labelInstanceIdPairs) {
+  core.setOutput('labelInstanceIdPairs', JSON.stringify(labelInstanceIdPairs));
+}
+
+async function startAndRegisterRunners() {
+  const githubRegistrationToken = await gh.getRegistrationToken();
+  core.info(`Generating ${config.input.count} EC2 instances for label: ${config.input.label}`);
+
+  const labelInstanceIdPairs = await aws.startEc2Instances(githubRegistrationToken);
+
+  await aws.waitForAllInstances(labelInstanceIdPairs);
+
+  const runnersRegisteredSuccessfully = await gh.runnersRegisteredSuccessfully(
+    labelInstanceIdPairs
+  );
+
+  // runners did not register in gh in time
+  if (!runnersRegisteredSuccessfully) {
+    if (labelInstanceIdPairs.length && labelInstanceIdPairs.length > 50) {
+      core.info(
+        [
+          `ALRIGHT - we came, we saw, we did not conquer,`,
+          `but we have ${labelInstanceIdPairs.length} instances we can use,`,
+          `\n-\nzo lezz go...\n-\n`,
+        ].join(' ')
+      );
+    } else {
+      core.error('NO INSTANCES RUNNING. EPIC FAIL');
+    }
+    // // cost ineffective to pay for all the instances we spun up for nothing
+    // await aws.stopEc2Instances(labelInstanceIdPairs.map((lidp) => lidp.ec2InstanceId));
+    // await gh.removeRunners([config.input.label]);
+    // return await startAndRegisterRunners();
+  }
+
+  return labelInstanceIdPairs;
 }
 
 async function start() {
-  const label = config.generateUniqueLabel();
-  const githubRegistrationToken = await gh.getRegistrationToken();
-  const ec2InstanceId = await aws.startEc2Instance(label, githubRegistrationToken);
-  setOutput(label, ec2InstanceId);
-  await aws.waitForInstanceRunning(ec2InstanceId);
-  await gh.waitForRunnerRegistered(label);
+  core.info('starting runners with the following parameters: ', JSON.stringify(config.input));
+  const labelAndRunnerIds = await startAndRegisterRunners();
+  setOutput(labelAndRunnerIds);
 }
 
 async function stop() {
-  await aws.terminateEc2Instance();
-  await gh.removeRunner();
+  await aws.terminateEc2InstancesByTags();
+  await gh.removeRunners();
 }
 
 (async function () {

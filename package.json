@@ -1,20 +1,25 @@
 {
-  "name": "ec2-github-runner",
+  "name": "ci-github-actions-ec2-runner",
   "description": "GitHub Action for automatic creation and registration AWS EC2 instance as a GitHub Actions self-hosted runner.",
-  "author": "Volodymyr Machula",
+  "author": "neverendingsupport",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git@github.com:machulav/ec2-github-runner.git"
+    "url": "git@github.com:neverendingsupport/ci-github-actions-ec2-runner.git"
   },
-  "homepage": "https://github.com/machulav/ec2-github-runner#readme",
+  "homepage": "https://github.com/neverendingsupport/ci-github-actions-ec2-runner#readme",
   "bugs": {
-    "url": "https://github.com/machulav/ec2-github-runner/issues"
+    "url": "https://github.com/neverendingsupport/ci-github-actions-ec2-runner/issues"
   },
   "scripts": {
     "index": "node -r dotenv/config ./src/index.js",
     "lint": "eslint ./src/*.js",
-    "package": "ncc build ./src/index.js"
+    "package": "ncc build ./src/index.js",
+    "build": "echo \"!!!!!!!!!!!!!!!!!!!!!!!!\n Be sure to use node v16\n!!!!!!!!!!!!!!!!!!!!!!!!\" && ncc build src/index.js -o dist",
+    "remove-runners": "node -r dotenv/config remove-runners.js",
+    "stop-runners-ci": "node src/index.js",
+    "start-runners": "node -r dotenv/config src/index.js dotenv_config_path=.env.start",
+    "stop-runners": "node -r dotenv/config src/index.js dotenv_config_path=.env.stop"
   },
   "dependencies": {
     "@actions/core": "^1.10.0",
